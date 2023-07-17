@@ -1,0 +1,53 @@
+function Remove-AccountUnknown {
+    [CmdletBinding()]
+    param (
+        
+    )
+     
+    process {
+        #variable for system accounts (which should never be deleted)
+        $systemaccounts = @('administrator', 'Public', 'default', 'DOMAIN\administrator', 'NetworkService', 'LocalService', 'systemprofile') 
+
+        #variable for user profiles (excluding any system profiles)
+        $onharddrive = Get-CimInstance win32_userprofile | Where-Object { $_.LocalPath.split('\')[-1] -notin $systemaccounts }
+
+        #empty arrays to add the objects that will be created later
+
+
+        #Run the command stored in $onharddrive and send each object down the pipeline through the scriptblock
+        $onharddrive | ForEach-Object {
+            
+            ##Within the loop save profile to a variable called p##
+            $p = $_
+
+            ##Try the following
+            try {
+                #create a new object for SID and set error action preference to stop so that the catch block is triggered
+                $pSID = New-Object System.Security.Principal.SecurityIdentifier($p.SID) -ErrorAction Stop
+
+                ##Translate the SID we just created for each profile to NTAccountName
+                $pSID.Translate([System.Security.Principal.NTAccount]) 
+
+                ##create a PSCustom Object called user with attributes of AccountName, Path, and Localpath
+                $knownuser = [PSCustomObject]@{
+                    AccountName = $ntAccount.Value
+                    Path        = $p.LocalPath
+                    SID         = $p.SID
+                } 
+            }
+            ##do the same in catch block but for AccountName set to error##
+            catch {
+                $unknownuser = [PSCustomObject]@{
+                    AccountName = "Unknown"
+                    Path        = $p.LocalPath
+                    SID         = $p.SID
+                }
+                ##Save these results to a variable called UnknownAccounts##
+                Write-Verbose "Removing Account $($p.LocalPath)" 
+                Remove-CimInstance -InputObject $p 
+                Write-Output "Account $($p.LocalPath) removed successfully..."
+            }
+        } 
+    }
+}
+Remove-AccountUnknown -Verbose
