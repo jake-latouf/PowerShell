@@ -1,0 +1,166 @@
+$global:Host = Read-Host "Enter the hostname of your organization's exchange server..."
+$global:OUPath = Read-Host "Enter the OU Path where mailboxes are created in your organization..."
+function Start-Main {
+    [CmdletBinding()]
+    param(
+    )
+    begin {
+        if ($global:Session) {
+            Write-Output "Session already established. Skipping connection..."
+            return
+        }
+        else {
+            Write-Verbose "Connecting to On-Prem Exchange server"
+            ## Connect to on-prem Exchange server
+            $global:Session = Get-PSSession | Where-Object { $_.ConfigurationName -eq "Microsoft.Exchange" }
+            if (-not $global:Session) {
+                $UserCredential = Get-Credential
+                $global:Session = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri "http://$($global:Host)/PowerShell/" -Authentication Kerberos -Credential $UserCredential
+            }
+            Import-PSSession $global:Session
+            Write-Output "Connection Successful"
+        }
+    }
+    process {
+        Write-Host
+        Write-Host
+        Write-Host
+        Write-Host "Starting Script to create a new shared mailbox... press any key to continue..."
+        Read-Host
+        Clear-Host
+
+        ##Get user input for validation function parameters
+        $UAlias = Read-Host "Enter the alias"
+        
+        $UDisplayName = Read-Host "Enter the display name you would like the mailbox to have"
+    
+        ##Call validation functions
+        $AliasValid = Test-ValidAlias -Alias $UAlias
+        $OUValid = Test-ValidOU -OU $global:OUPath
+        $DisplayNameValid = Test-ValidDisplayName -DisplayName $UDisplayName
+    
+        #if all functions return true continue with the operation
+        if ($AliasValid -eq $true -and $DisplayNameValid -eq $true -and $OUValid -eq $true) {
+            Write-Host
+            Write-Host "Alias - $UAlias - Validated" -ForegroundColor Green
+            Write-Host
+            Write-Host "Region - $gloabal:OUPath - Validated" -ForegroundColor Green
+            Write-Host
+            Write-Host "Display Name - $UDisplayName - Validated" -ForegroundColor Green
+    
+            
+            try {
+                Write-Verbose "Attempting to create mailbox..."
+                New-Mailbox -Name $UDisplayName -OrganizationalUnit $RegionOU -Alias $UAlias -Shared
+                Write-Host
+                Write-Host "Mailbox created successfully" -ForegroundColor Green
+                Start-Sleep -Seconds 30
+
+            }
+            catch {
+                $errorMessage1 = $_.Exception.Message
+                Write-Warning "An error occurred while creating mailbox"
+                Write-Verbose "Stopping script in 30 seconds"
+                Start-Sleep -Seconds 30
+                exit
+            }
+        }
+         else {
+            Write-Host
+            Write-Host
+            Write-Host
+            Write-Host "Failed to validate one or more parameters" -ForegroundColor Red -BackgroundColor Black
+        }
+    }
+
+}
+
+function Test-ValidAlias {
+    param (
+        [string]$Alias
+    )
+    ##operations to check if the alias has any spaces, domain names, and in use status
+    $containsSpaces = $Alias -match '\s'
+    $containsDomain = $Alias -match '^\w+@[\w.-]+$'
+    $aliasInUse = Get-ADObject -Filter {MailNickName -eq $Alias}
+
+    ##if $containsSpaces and $containsDomain are all false, and $aliasInUse returns nothing, return true
+    if($containsSpaces -eq $false -and $aliasInUse -eq $null -and $containsDomain -eq $false) {
+        return $true
+    } 
+    if($containsSpaces -eq $true) {
+        Write-Host
+        Write-Warning "Aliases cannot contain spaces"
+        Write-Host
+        Write-Host "Alias - $Alias - Invalid" -ForegroundColor Red -BackgroundColor Black 
+        Write-Host
+        Write-Host "$Alias Contains Spaces" -ForegroundColor Yellow -BackgroundColor Black
+        return $false
+    }
+    if($containsDomain -eq $true) {
+        Write-Host
+        Write-Warning "Aliases cannot contain domain names"
+        Write-Host
+        Write-Host "Alias - $Alias - Invalid" -ForegroundColor Red -BackgroundColor Black
+        Write-Host
+        Write-Host "$Alias contains domain name" -ForegroundColor Yellow -BackgroundColor Black
+        return $false
+    }
+    if($aliasInUse -ne $null) {
+        Write-Host
+        Write-Warning "Aliases must be globally unique"
+        Write-Host
+        Write-Host "Alias - $Alias - Invalid" -ForegroundColor Red -BackgroundColor Black
+        Write-Host
+        Write-Host "Alias in use by $($aliasInUse.Name)" -ForegroundColor Yellow -BackgroundColor Black
+        return $false
+    }
+    #don't know why this is here but please do not remove as the script WILL break
+    return $false
+}
+
+function Test-ValidOU {
+    param (
+        [string]$OU
+    )
+    
+    #Validate OU
+    $OUcheck = Get-ADOrganizationalUnit -Identity $global:OUPath
+    
+    ##if the output stored in the $OUcheck variable is not empty then return true
+    if($OUcheck -ne $null) {
+        return $true
+    }
+    else {
+        Write-Host
+        Write-Host "OU - $OU - Invalid" -ForegroundColor Red -BackgroundColor Black
+        return $false
+    }
+    #don't know why this is here but please do not remove as the script WILL break
+    return $false
+}
+
+function Test-ValidDisplayName {
+    param (
+        [string]$DisplayName
+    )
+
+    $DisplayNameInUse = Get-ADObject -Filter {DisplayName -eq "$DisplayName"}
+
+    #if the displaynameinuse variable is empty return true
+    if($DisplayNameInUse -eq  $null) {
+        return $true 
+    }
+    else {
+        Write-Warning "Display Names must be globally Unique"
+        Write-Host
+        Write-Host "Display Name - $DisplayName - Invalid" -ForegroundColor Red -BackgroundColor Black
+        Write-Host
+        Write-Host "Display Name in use by $($DisplayNameInUse.Name)" -ForegroundColor Yellow -BackgroundColor Black
+        return $false
+    }
+    #don't know why this is here but please do not remove as the script WILL break
+    return $false
+}
+
+Start-Main -Verbose
